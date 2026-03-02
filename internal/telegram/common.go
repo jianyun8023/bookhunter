@@ -2,6 +2,7 @@ package telegram
 
 import (
 	"context"
+	"time"
 
 	"github.com/gotd/contrib/bg"
 	"github.com/gotd/contrib/middleware/floodwait"
@@ -11,6 +12,7 @@ import (
 	"github.com/gotd/td/tg"
 
 	"github.com/bookstairs/bookhunter/internal/file"
+	"github.com/bookstairs/bookhunter/internal/log"
 )
 
 type (
@@ -79,5 +81,33 @@ func New(channelID, mobile string, appID int64, appHash string, sessionPath, pro
 		return nil, err
 	}
 
+	t.keepAlive()
+
 	return t, nil
+}
+
+// keepAlive will periodically send a lightweight API request (updates.getState) to the server
+// to keep the session alive and update the last active time of the device.
+func (t *Telegram) keepAlive() {
+	go func() {
+		// Immediately update the active time once upon startup.
+		if _, err := t.client.API().UpdatesGetState(t.ctx); err != nil {
+			log.Warn("Failed to send initial keep-alive request: ", err)
+		}
+
+		// Update every 5 minutes.
+		ticker := time.NewTicker(5 * time.Minute)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-t.ctx.Done():
+				return
+			case <-ticker.C:
+				if _, err := t.client.API().UpdatesGetState(t.ctx); err != nil {
+					log.Warn("Failed to send keep-alive request: ", err)
+				}
+			}
+		}
+	}()
 }
